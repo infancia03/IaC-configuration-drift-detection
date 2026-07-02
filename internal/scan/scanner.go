@@ -12,12 +12,15 @@ import (
 )
 
 type Options struct {
-	Workspace string
-	StatePath string
-	AWSRegion string
-	AWSProfile string
-	Drift      drift.Options
-	DryRunCloud bool
+	Workspace     string
+	StatePath     string
+	StateS3Bucket string
+	StateS3Key    string
+	StateS3Region string
+	AWSRegion     string
+	AWSProfile    string
+	Drift         drift.Options
+	DryRunCloud   bool
 }
 
 type Scanner struct {
@@ -30,14 +33,14 @@ func NewScanner() *Scanner {
 
 // Run executes the full state → fetch → compare pipeline.
 func (s *Scanner) Run(ctx context.Context, opts Options) (model.DriftReport, error) {
-	if opts.StatePath == "" {
-		return model.DriftReport{}, fmt.Errorf("state path is required")
+	if opts.StatePath == "" && (opts.StateS3Bucket == "" || opts.StateS3Key == "") {
+		return model.DriftReport{}, fmt.Errorf("state path or s3 state bucket/key is required")
 	}
 	if opts.Workspace == "" {
 		opts.Workspace = "default"
 	}
 
-	rawState, err := s.stateReader.ReadFile(ctx, opts.StatePath)
+	rawState, err := s.readState(ctx, opts)
 	if err != nil {
 		return model.DriftReport{}, fmt.Errorf("read state: %w", err)
 	}
@@ -67,27 +70,62 @@ func (s *Scanner) Run(ctx context.Context, opts Options) (model.DriftReport, err
 	return report, nil
 }
 
-// alignCloudResources maps cloud resources to expected canonical IDs using bucket name.
+func (s *Scanner) readState(ctx context.Context, opts Options) ([]state.RawResource, error) {
+	if opts.StateS3Bucket != "" || opts.StateS3Key != "" {
+		region := opts.StateS3Region
+		if region == "" {
+			region = opts.AWSRegion
+		}
+		return s.stateReader.ReadS3(ctx, state.S3Backend{
+			Bucket:  opts.StateS3Bucket,
+			Key:     opts.StateS3Key,
+			Region:  region,
+			Profile: opts.AWSProfile,
+		})
+	}
+	return s.stateReader.ReadFile(ctx, opts.StatePath)
+}
+
+// alignCloudResources maps cloud resources to expected canonical IDs using cloud identifiers.
 func alignCloudResources(expected, actual []model.Resource) []model.Resource {
-	bucketToExpected := make(map[string]model.Resource)
+	cloudIDToExpected := make(map[string]model.Resource)
 	for _, exp := range expected {
-		if bucket, ok := exp.Attributes["bucket"].(string); ok {
-			bucketToExpected[bucket] = exp
+		for _, key := range []string{"cloud_id", "bucket"} {
+			if id, ok := exp.Attributes[key].(string); ok && id != "" {
+				cloudIDToExpected[identityKey(exp.Type, key, id)] = exp
+			}
 		}
 	}
 
 	aligned := make([]model.Resource, 0, len(actual))
 	for _, act := range actual {
-		bucket, _ := act.Attributes["bucket"].(string)
-		if exp, ok := bucketToExpected[bucket]; ok {
-			act.ID = exp.ID
-			act.Name = exp.Name
-			act.Address = exp.Address
-			act.Region = exp.Region
-		} else {
-			act.ID = fmt.Sprintf("%s:%s:%s:bucket:%s", act.Provider, act.Type, act.Region, bucket)
+		matched := false
+		for _, key := range []string{"cloud_id", "bucket"} {
+			id, _ := act.Attributes[key].(string)
+			if id == "" {
+				continue
+			}
+			if exp, ok := cloudIDToExpected[identityKey(act.Type, key, id)]; ok {
+				act.ID = exp.ID
+				act.Name = exp.Name
+				act.Address = exp.Address
+				act.Region = exp.Region
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			id, _ := act.Attributes["cloud_id"].(string)
+			if id == "" {
+				id, _ = act.Attributes["bucket"].(string)
+			}
+			act.ID = fmt.Sprintf("%s:%s:%s:cloud:%s", act.Provider, act.Type, act.Region, id)
 		}
 		aligned = append(aligned, act)
 	}
 	return aligned
+}
+
+func identityKey(resourceType, attr, id string) string {
+	return resourceType + ":" + attr + ":" + id
 }

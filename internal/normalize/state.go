@@ -23,6 +23,12 @@ func mapStateResource(r state.RawResource) (model.Resource, bool) {
 	switch r.Type {
 	case "aws_s3_bucket":
 		return mapAWSS3FromState(r), true
+	case "aws_instance":
+		return mapAWSInstanceFromState(r), true
+	case "aws_iam_role":
+		return mapAWSIAMRoleFromState(r), true
+	case "aws_security_group":
+		return mapAWSSecurityGroupFromState(r), true
 	default:
 		return model.Resource{}, false
 	}
@@ -50,6 +56,75 @@ func mapAWSS3FromState(r state.RawResource) model.Resource {
 		Region:     region,
 		Attributes: attributes,
 		Tags:       extractTags(attrs),
+	}
+}
+
+func mapAWSInstanceFromState(r state.RawResource) model.Resource {
+	attrs := r.Attributes
+	region := defaultRegion(stringAttr(attrs, "region"))
+	return model.Resource{
+		ID:       canonicalID(model.ProviderAWS, r.Type, region, r.Name),
+		Provider: model.ProviderAWS,
+		Type:     r.Type,
+		Name:     r.Name,
+		Address:  r.Address,
+		Region:   region,
+		Attributes: map[string]any{
+			"cloud_id":      stringAttr(attrs, "id"),
+			"ami":           stringAttr(attrs, "ami"),
+			"instance_type": stringAttr(attrs, "instance_type"),
+			"subnet_id":     stringAttr(attrs, "subnet_id"),
+			"vpc_id":        stringAttr(attrs, "vpc_id"),
+			"private_ip":    stringAttr(attrs, "private_ip"),
+		},
+		Tags: extractTags(attrs),
+	}
+}
+
+func mapAWSIAMRoleFromState(r state.RawResource) model.Resource {
+	attrs := r.Attributes
+	region := defaultRegion(stringAttr(attrs, "region"))
+	name := stringAttr(attrs, "name")
+	if name == "" {
+		name = r.Name
+	}
+	return model.Resource{
+		ID:       canonicalID(model.ProviderAWS, r.Type, region, r.Name),
+		Provider: model.ProviderAWS,
+		Type:     r.Type,
+		Name:     r.Name,
+		Address:  r.Address,
+		Region:   region,
+		Attributes: map[string]any{
+			"cloud_id":           name,
+			"name":               name,
+			"arn":                stringAttr(attrs, "arn"),
+			"path":               stringAttr(attrs, "path"),
+			"assume_role_policy": stringAttr(attrs, "assume_role_policy"),
+		},
+		Tags: extractTags(attrs),
+	}
+}
+
+func mapAWSSecurityGroupFromState(r state.RawResource) model.Resource {
+	attrs := r.Attributes
+	region := defaultRegion(stringAttr(attrs, "region"))
+	return model.Resource{
+		ID:       canonicalID(model.ProviderAWS, r.Type, region, r.Name),
+		Provider: model.ProviderAWS,
+		Type:     r.Type,
+		Name:     r.Name,
+		Address:  r.Address,
+		Region:   region,
+		Attributes: map[string]any{
+			"cloud_id":           stringAttr(attrs, "id"),
+			"name":               stringAttr(attrs, "name"),
+			"description":        stringAttr(attrs, "description"),
+			"vpc_id":             stringAttr(attrs, "vpc_id"),
+			"ingress_rule_count": listLen(attrs["ingress"]),
+			"egress_rule_count":  listLen(attrs["egress"]),
+		},
+		Tags: extractTags(attrs),
 	}
 }
 
@@ -91,6 +166,24 @@ func stringAttr(attrs map[string]any, key string) string {
 		return fmt.Sprint(v)
 	}
 	return ""
+}
+
+func defaultRegion(region string) string {
+	if region == "" {
+		return "us-east-1"
+	}
+	return region
+}
+
+func listLen(value any) int {
+	switch v := value.(type) {
+	case []any:
+		return len(v)
+	case []map[string]any:
+		return len(v)
+	default:
+		return 0
+	}
 }
 
 func canonicalID(provider model.Provider, typ, region, name string) string {

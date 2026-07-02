@@ -11,6 +11,8 @@ import (
 // Options controls comparison behavior.
 type Options struct {
 	IgnoreAttributes map[string]struct{}
+	IgnoreTags       map[string]struct{}
+	IgnorePaths      map[string]struct{}
 }
 
 // Engine compares expected (state) and actual (cloud) resource sets.
@@ -49,8 +51,8 @@ func (e *Engine) Compare(workspace string, expected, actual []model.Resource) mo
 			continue
 		}
 
-		attrChanges := diffAttributes(exp.Attributes, act.Attributes, e.opts.IgnoreAttributes)
-		tagChanges := diffTags(exp.Tags, act.Tags)
+		attrChanges := diffAttributes(exp.Attributes, act.Attributes, e.opts.ignoreAttributes())
+		tagChanges := diffTags(exp.Tags, act.Tags, e.opts.ignoreTags())
 
 		switch {
 		case len(attrChanges) > 0 && len(tagChanges) > 0:
@@ -136,7 +138,7 @@ func diffAttributes(expected, actual map[string]any, ignore map[string]struct{})
 	return changes
 }
 
-func diffTags(expected, actual map[string]string) []model.Change {
+func diffTags(expected, actual map[string]string, ignore map[string]struct{}) []model.Change {
 	exp := normalizeTagMap(expected)
 	act := normalizeTagMap(actual)
 
@@ -144,6 +146,9 @@ func diffTags(expected, actual map[string]string) []model.Change {
 	keys := unionStringKeys(exp, act)
 
 	for _, key := range keys {
+		if shouldIgnore(key, ignore) || shouldIgnore("tags."+key, ignore) {
+			continue
+		}
 		expVal, expOK := exp[key]
 		actVal, actOK := act[key]
 		if expOK == actOK && expVal == actVal {
@@ -156,6 +161,24 @@ func diffTags(expected, actual map[string]string) []model.Change {
 		})
 	}
 	return changes
+}
+
+func (o Options) ignoreAttributes() map[string]struct{} {
+	return mergeIgnores(o.IgnorePaths, o.IgnoreAttributes)
+}
+
+func (o Options) ignoreTags() map[string]struct{} {
+	return mergeIgnores(o.IgnorePaths, o.IgnoreTags)
+}
+
+func mergeIgnores(sets ...map[string]struct{}) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, set := range sets {
+		for k := range set {
+			out[k] = struct{}{}
+		}
+	}
+	return out
 }
 
 func normalizeTagMap(tags map[string]string) map[string]string {
