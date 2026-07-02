@@ -7,6 +7,10 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 // Reader loads Terraform state files and extracts raw resources.
@@ -52,6 +56,50 @@ func (r *Reader) ReadFile(_ context.Context, path string) ([]RawResource, error)
 	}
 	defer f.Close()
 	return r.Read(f)
+}
+
+type S3Backend struct {
+	Bucket  string
+	Key     string
+	Region  string
+	Profile string
+}
+
+// ReadS3 loads Terraform state from an S3 remote backend object.
+func (r *Reader) ReadS3(ctx context.Context, backend S3Backend) ([]RawResource, error) {
+	if backend.Bucket == "" {
+		return nil, fmt.Errorf("s3 state bucket is required")
+	}
+	if backend.Key == "" {
+		return nil, fmt.Errorf("s3 state key is required")
+	}
+	if backend.Region == "" {
+		backend.Region = "us-east-1"
+	}
+
+	opts := []func(*config.LoadOptions) error{
+		config.WithRegion(backend.Region),
+	}
+	if backend.Profile != "" {
+		opts = append(opts, config.WithSharedConfigProfile(backend.Profile))
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("load aws config for s3 state: %w", err)
+	}
+
+	client := s3.NewFromConfig(cfg)
+	out, err := client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(backend.Bucket),
+		Key:    aws.String(backend.Key),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get s3 state object: %w", err)
+	}
+	defer out.Body.Close()
+
+	return r.Read(out.Body)
 }
 
 // Read parses Terraform state JSON from a reader.

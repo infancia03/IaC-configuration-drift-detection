@@ -2,9 +2,9 @@
 
 Cloud-agnostic Terraform drift detection platform. Compares Terraform state (expected) against live cloud infrastructure (actual), normalizes both into a common model, and reports differences without running `terraform plan` or `apply`.
 
-## Phase 1 vertical slice
+## Phase 2 vertical slice
 
-This MVP implements the first end-to-end path for AWS S3 buckets:
+This MVP implements the first end-to-end path for AWS S3 buckets, EC2 instances, IAM roles, and security groups:
 
 ```
 Terraform State → State Reader → Normalizer → Expected Model
@@ -21,7 +21,7 @@ Cloud APIs      → AWS Fetcher → Normalizer → Actual Model
 
 - Go 1.22+
 - AWS credentials configured (for live scans)
-- A Terraform state file with `aws_s3_bucket` resources
+- A Terraform state file with supported AWS resources
 
 ### Run tests
 
@@ -35,8 +35,36 @@ go test ./...
 # Live AWS comparison
 go run ./cmd/driftctl scan --state ./testdata/terraform.tfstate --output json
 
+# Remote S3 state backend
+go run ./cmd/driftctl scan \
+  --state-s3-bucket my-tfstate-bucket \
+  --state-s3-key envs/prod/terraform.tfstate \
+  --state-s3-region us-east-1 \
+  --output json
+
 # Local dry-run (no AWS calls; validates pipeline)
 go run ./cmd/driftctl scan --state ./testdata/terraform.tfstate --dry-run-cloud --output json
+
+# CI mode: fail with a non-zero exit code when drift is detected
+go run ./cmd/driftctl scan --state ./testdata/terraform.tfstate --fail-on-drift --output json
+```
+
+### Ignore rules
+
+Create a JSON ignore rules file for noisy attributes or tags:
+
+```json
+{
+  "ignore_attributes": ["last_modified", "public_ip"],
+  "ignore_tags": ["owner"],
+  "ignore_paths": ["metadata.*"]
+}
+```
+
+Then pass it to scans:
+
+```bash
+go run ./cmd/driftctl scan --state ./testdata/terraform.tfstate --ignore-config ./ignore.json --output json
 ```
 
 ### Build binary
@@ -70,8 +98,11 @@ testdata/              Fixture state for tests
 
 ## Roadmap
 
-- [ ] S3 remote state backend
-- [ ] Additional AWS resource types (EC2, IAM, RDS)
+- [x] S3 remote state backend
+- [x] Additional AWS resource types (EC2, IAM, security groups)
+- [x] CI failure mode with `--fail-on-drift`
+- [x] Ignore rules config file
+- [ ] RDS support
 - [ ] Azure and GCP providers
 - [ ] Scheduled scans and REST API
 - [ ] Dashboard UI

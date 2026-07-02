@@ -5,6 +5,8 @@ go 1.22
 require (
 	github.com/aws/aws-sdk-go-v2 v1.36.3
 	github.com/aws/aws-sdk-go-v2/config v1.29.14
+	github.com/aws/aws-sdk-go-v2/service/ec2 v1.200.0
+	github.com/aws/aws-sdk-go-v2/service/iam v1.39.4
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.79.2
 	github.com/google/uuid v1.6.0
 	github.com/spf13/cobra v1.9.1

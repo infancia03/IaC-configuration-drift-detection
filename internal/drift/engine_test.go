@@ -153,3 +153,26 @@ func TestCompare_IgnoreAttributes(t *testing.T) {
 		t.Fatalf("expected ignored attribute to suppress drift, got %+v", report.Drifts)
 	}
 }
+
+func TestCompare_IgnoreTagPaths(t *testing.T) {
+	engine := drift.NewEngine(drift.Options{
+		IgnoreTags: map[string]struct{}{
+			"environment": {},
+		},
+	})
+	id := "aws:aws_instance:us-east-1:web"
+	expected := []model.Resource{{
+		ID: id, Provider: model.ProviderAWS, Type: "aws_instance", Name: "web", Region: "us-east-1",
+		Tags: map[string]string{"Environment": "prod"},
+	}}
+	actual := []model.Resource{{
+		ID: id, Provider: model.ProviderAWS, Type: "aws_instance", Name: "web", Region: "us-east-1",
+		Tags: map[string]string{"environment": "staging"},
+	}}
+
+	report := engine.Compare("prod", expected, actual)
+
+	if len(report.Drifts) != 0 {
+		t.Fatalf("expected ignored tag to suppress drift, got %+v", report.Drifts)
+	}
+}
