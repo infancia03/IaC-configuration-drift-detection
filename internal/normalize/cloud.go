@@ -18,6 +18,12 @@ func FromCloud(raw []aws.Resource) []model.Resource {
 			out = append(out, mapAWSIAMRoleFromCloud(r))
 		case "aws_security_group":
 			out = append(out, mapAWSSecurityGroupFromCloud(r))
+		case "aws_db_instance":
+			out = append(out, mapAWSDBInstanceFromCloud(r))
+		case "aws_lambda_function":
+			out = append(out, mapAWSLambdaFunctionFromCloud(r))
+		case "aws_eks_cluster":
+			out = append(out, mapAWSEKSClusterFromCloud(r))
 		}
 	}
 	return out
@@ -38,11 +44,9 @@ func mapAWSInstanceFromCloud(r aws.Resource) model.Resource {
 			"cloud_id":      r.CloudID,
 			"ami":           r.ImageID,
 			"instance_type": r.InstanceType,
-			"state":         r.State,
 			"subnet_id":     r.SubnetID,
 			"vpc_id":        r.VPCID,
 			"private_ip":    r.PrivateIPAddress,
-			"public_ip":     r.PublicIPAddress,
 		},
 		Tags: r.Tags,
 	}
@@ -80,6 +84,68 @@ func mapAWSSecurityGroupFromCloud(r aws.Resource) model.Resource {
 			"vpc_id":             r.VPCID,
 			"ingress_rule_count": r.IngressRuleCount,
 			"egress_rule_count":  r.EgressRuleCount,
+		},
+		Tags: r.Tags,
+	}
+}
+
+func mapAWSDBInstanceFromCloud(r aws.Resource) model.Resource {
+	return model.Resource{
+		ID:       canonicalCloudID("aws_db_instance", r.Region, r.CloudID),
+		Provider: model.ProviderAWS,
+		Type:     "aws_db_instance",
+		Name:     r.Name,
+		Region:   r.Region,
+		Attributes: map[string]any{
+			"cloud_id":            r.CloudID,
+			"identifier":          r.CloudID,
+			"arn":                 r.ARN,
+			"engine":              r.Engine,
+			"instance_class":      r.DBInstanceClass,
+			"allocated_storage":   int(r.AllocatedStorage),
+			"storage_type":        r.StorageType,
+			"multi_az":            r.MultiAZ,
+			"publicly_accessible": r.PubliclyAccessible,
+		},
+		Tags: r.Tags,
+	}
+}
+
+func mapAWSLambdaFunctionFromCloud(r aws.Resource) model.Resource {
+	return model.Resource{
+		ID:       canonicalCloudID("aws_lambda_function", r.Region, r.CloudID),
+		Provider: model.ProviderAWS,
+		Type:     "aws_lambda_function",
+		Name:     r.Name,
+		Region:   r.Region,
+		Attributes: map[string]any{
+			"cloud_id":      r.CloudID,
+			"function_name": r.Name,
+			"arn":           r.ARN,
+			"runtime":       r.Runtime,
+			"handler":       r.Handler,
+			"role":          r.Role,
+			"memory_size":   int(r.MemorySize),
+			"timeout":       int(r.Timeout),
+		},
+		Tags: r.Tags,
+	}
+}
+
+func mapAWSEKSClusterFromCloud(r aws.Resource) model.Resource {
+	return model.Resource{
+		ID:       canonicalCloudID("aws_eks_cluster", r.Region, r.CloudID),
+		Provider: model.ProviderAWS,
+		Type:     "aws_eks_cluster",
+		Name:     r.Name,
+		Region:   r.Region,
+		Attributes: map[string]any{
+			"cloud_id": r.CloudID,
+			"name":     r.Name,
+			"arn":      r.ARN,
+			"version":  r.Version,
+			"role":     r.Role,
+			"vpc_id":   r.VPCID,
 		},
 		Tags: r.Tags,
 	}

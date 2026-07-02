@@ -8,7 +8,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
+	"github.com/aws/aws-sdk-go-v2/service/lambda"
+	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
@@ -34,6 +37,20 @@ type Resource struct {
 	EgressRuleCount    int
 	Path               string
 	AssumeRolePolicy   string
+	Engine             string
+	DBInstanceClass    string
+	Status             string
+	StorageType        string
+	AllocatedStorage   int32
+	MultiAZ            bool
+	PubliclyAccessible bool
+	Runtime            string
+	Handler            string
+	Role               string
+	MemorySize         int32
+	Timeout            int32
+	Version            string
+	Endpoint           string
 	Tags               map[string]string
 }
 
@@ -97,6 +114,27 @@ func (f *Fetcher) Fetch(ctx context.Context, resourceTypes []string) ([]Resource
 		}
 		out = append(out, resources...)
 	}
+	if want["aws_db_instance"] {
+		resources, err := f.fetchRDSInstances(ctx, cfg)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, resources...)
+	}
+	if want["aws_lambda_function"] {
+		resources, err := f.fetchLambdaFunctions(ctx, cfg)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, resources...)
+	}
+	if want["aws_eks_cluster"] {
+		resources, err := f.fetchEKSClusters(ctx, cfg)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, resources...)
+	}
 	return out, nil
 }
 
@@ -104,7 +142,7 @@ func wantedTypes(resourceTypes []string) map[string]bool {
 	out := map[string]bool{}
 	for _, t := range resourceTypes {
 		switch t {
-		case "aws_s3_bucket", "aws_instance", "aws_iam_role", "aws_security_group":
+		case "aws_s3_bucket", "aws_instance", "aws_iam_role", "aws_security_group", "aws_db_instance", "aws_lambda_function", "aws_eks_cluster":
 			out[t] = true
 		}
 	}
@@ -243,6 +281,115 @@ func (f *Fetcher) fetchIAMRoles(ctx context.Context, cfg aws.Config) ([]Resource
 	return out, nil
 }
 
+func (f *Fetcher) fetchRDSInstances(ctx context.Context, cfg aws.Config) ([]Resource, error) {
+	client := rds.NewFromConfig(cfg)
+	paginator := rds.NewDescribeDBInstancesPaginator(client, &rds.DescribeDBInstancesInput{})
+
+	out := make([]Resource, 0)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("describe rds instances: %w", err)
+		}
+		for _, db := range page.DBInstances {
+			arn := aws.ToString(db.DBInstanceArn)
+			tags, _ := f.fetchRDSTags(ctx, client, arn)
+			vpcID := ""
+			if db.DBSubnetGroup != nil {
+				vpcID = aws.ToString(db.DBSubnetGroup.VpcId)
+			}
+			out = append(out, Resource{
+				Type:               "aws_db_instance",
+				Name:               aws.ToString(db.DBInstanceIdentifier),
+				Region:             f.region,
+				CloudID:            aws.ToString(db.DBInstanceIdentifier),
+				ARN:                arn,
+				Engine:             aws.ToString(db.Engine),
+				DBInstanceClass:    aws.ToString(db.DBInstanceClass),
+				Status:             aws.ToString(db.DBInstanceStatus),
+				StorageType:        aws.ToString(db.StorageType),
+				AllocatedStorage:   aws.ToInt32(db.AllocatedStorage),
+				MultiAZ:            aws.ToBool(db.MultiAZ),
+				PubliclyAccessible: aws.ToBool(db.PubliclyAccessible),
+				VPCID:              vpcID,
+				Tags:               tags,
+			})
+		}
+	}
+	return out, nil
+}
+
+func (f *Fetcher) fetchLambdaFunctions(ctx context.Context, cfg aws.Config) ([]Resource, error) {
+	client := lambda.NewFromConfig(cfg)
+	paginator := lambda.NewListFunctionsPaginator(client, &lambda.ListFunctionsInput{})
+
+	out := make([]Resource, 0)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list lambda functions: %w", err)
+		}
+		for _, fn := range page.Functions {
+			arn := aws.ToString(fn.FunctionArn)
+			tags, _ := f.fetchLambdaTags(ctx, client, arn)
+			out = append(out, Resource{
+				Type:       "aws_lambda_function",
+				Name:       aws.ToString(fn.FunctionName),
+				Region:     f.region,
+				CloudID:    aws.ToString(fn.FunctionName),
+				ARN:        arn,
+				Runtime:    string(fn.Runtime),
+				Handler:    aws.ToString(fn.Handler),
+				Role:       aws.ToString(fn.Role),
+				MemorySize: aws.ToInt32(fn.MemorySize),
+				Timeout:    aws.ToInt32(fn.Timeout),
+				Tags:       tags,
+			})
+		}
+	}
+	return out, nil
+}
+
+func (f *Fetcher) fetchEKSClusters(ctx context.Context, cfg aws.Config) ([]Resource, error) {
+	client := eks.NewFromConfig(cfg)
+	paginator := eks.NewListClustersPaginator(client, &eks.ListClustersInput{})
+
+	out := make([]Resource, 0)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list eks clusters: %w", err)
+		}
+		for _, name := range page.Clusters {
+			cluster, err := client.DescribeCluster(ctx, &eks.DescribeClusterInput{Name: aws.String(name)})
+			if err != nil {
+				return nil, fmt.Errorf("describe eks cluster %q: %w", name, err)
+			}
+			if cluster.Cluster == nil {
+				continue
+			}
+			vpcID := ""
+			if cluster.Cluster.ResourcesVpcConfig != nil {
+				vpcID = aws.ToString(cluster.Cluster.ResourcesVpcConfig.VpcId)
+			}
+			out = append(out, Resource{
+				Type:     "aws_eks_cluster",
+				Name:     aws.ToString(cluster.Cluster.Name),
+				Region:   f.region,
+				CloudID:  aws.ToString(cluster.Cluster.Name),
+				ARN:      aws.ToString(cluster.Cluster.Arn),
+				Status:   string(cluster.Cluster.Status),
+				Version:  aws.ToString(cluster.Cluster.Version),
+				Role:     aws.ToString(cluster.Cluster.RoleArn),
+				VPCID:    vpcID,
+				Endpoint: aws.ToString(cluster.Cluster.Endpoint),
+				Tags:     cluster.Cluster.Tags,
+			})
+		}
+	}
+	return out, nil
+}
+
 func (f *Fetcher) fetchBucketTags(ctx context.Context, client *s3.Client, bucket *string) (map[string]string, error) {
 	out, err := client.GetBucketTagging(ctx, &s3.GetBucketTaggingInput{Bucket: bucket})
 	if err != nil {
@@ -269,6 +416,34 @@ func (f *Fetcher) fetchRoleTags(ctx context.Context, client *iam.Client, roleNam
 		}
 	}
 	return tags, nil
+}
+
+func (f *Fetcher) fetchRDSTags(ctx context.Context, client *rds.Client, arn string) (map[string]string, error) {
+	if arn == "" {
+		return map[string]string{}, nil
+	}
+	out, err := client.ListTagsForResource(ctx, &rds.ListTagsForResourceInput{ResourceName: aws.String(arn)})
+	if err != nil {
+		return map[string]string{}, nil
+	}
+	tags := make(map[string]string, len(out.TagList))
+	for _, tag := range out.TagList {
+		if tag.Key != nil && tag.Value != nil {
+			tags[aws.ToString(tag.Key)] = aws.ToString(tag.Value)
+		}
+	}
+	return tags, nil
+}
+
+func (f *Fetcher) fetchLambdaTags(ctx context.Context, client *lambda.Client, arn string) (map[string]string, error) {
+	if arn == "" {
+		return map[string]string{}, nil
+	}
+	out, err := client.ListTags(ctx, &lambda.ListTagsInput{Resource: aws.String(arn)})
+	if err != nil {
+		return map[string]string{}, nil
+	}
+	return out.Tags, nil
 }
 
 func ec2Tags(tags []ec2types.Tag) map[string]string {

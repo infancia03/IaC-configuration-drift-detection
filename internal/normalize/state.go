@@ -29,6 +29,12 @@ func mapStateResource(r state.RawResource) (model.Resource, bool) {
 		return mapAWSIAMRoleFromState(r), true
 	case "aws_security_group":
 		return mapAWSSecurityGroupFromState(r), true
+	case "aws_db_instance":
+		return mapAWSDBInstanceFromState(r), true
+	case "aws_lambda_function":
+		return mapAWSLambdaFunctionFromState(r), true
+	case "aws_eks_cluster":
+		return mapAWSEKSClusterFromState(r), true
 	default:
 		return model.Resource{}, false
 	}
@@ -128,6 +134,91 @@ func mapAWSSecurityGroupFromState(r state.RawResource) model.Resource {
 	}
 }
 
+func mapAWSDBInstanceFromState(r state.RawResource) model.Resource {
+	attrs := r.Attributes
+	region := defaultRegion(stringAttr(attrs, "region"))
+	identifier := stringAttr(attrs, "identifier")
+	if identifier == "" {
+		identifier = stringAttr(attrs, "id")
+	}
+	if identifier == "" {
+		identifier = r.Name
+	}
+	return model.Resource{
+		ID:       canonicalID(model.ProviderAWS, r.Type, region, r.Name),
+		Provider: model.ProviderAWS,
+		Type:     r.Type,
+		Name:     r.Name,
+		Address:  r.Address,
+		Region:   region,
+		Attributes: map[string]any{
+			"cloud_id":            identifier,
+			"identifier":          identifier,
+			"engine":              stringAttr(attrs, "engine"),
+			"instance_class":      stringAttr(attrs, "instance_class"),
+			"allocated_storage":   intAttr(attrs, "allocated_storage"),
+			"storage_type":        stringAttr(attrs, "storage_type"),
+			"multi_az":            boolAttr(attrs, "multi_az"),
+			"publicly_accessible": boolAttr(attrs, "publicly_accessible"),
+		},
+		Tags: extractTags(attrs),
+	}
+}
+
+func mapAWSLambdaFunctionFromState(r state.RawResource) model.Resource {
+	attrs := r.Attributes
+	region := defaultRegion(stringAttr(attrs, "region"))
+	name := stringAttr(attrs, "function_name")
+	if name == "" {
+		name = r.Name
+	}
+	return model.Resource{
+		ID:       canonicalID(model.ProviderAWS, r.Type, region, r.Name),
+		Provider: model.ProviderAWS,
+		Type:     r.Type,
+		Name:     r.Name,
+		Address:  r.Address,
+		Region:   region,
+		Attributes: map[string]any{
+			"cloud_id":      name,
+			"function_name": name,
+			"arn":           stringAttr(attrs, "arn"),
+			"runtime":       stringAttr(attrs, "runtime"),
+			"handler":       stringAttr(attrs, "handler"),
+			"role":          stringAttr(attrs, "role"),
+			"memory_size":   intAttr(attrs, "memory_size"),
+			"timeout":       intAttr(attrs, "timeout"),
+		},
+		Tags: extractTags(attrs),
+	}
+}
+
+func mapAWSEKSClusterFromState(r state.RawResource) model.Resource {
+	attrs := r.Attributes
+	region := defaultRegion(stringAttr(attrs, "region"))
+	name := stringAttr(attrs, "name")
+	if name == "" {
+		name = r.Name
+	}
+	return model.Resource{
+		ID:       canonicalID(model.ProviderAWS, r.Type, region, r.Name),
+		Provider: model.ProviderAWS,
+		Type:     r.Type,
+		Name:     r.Name,
+		Address:  r.Address,
+		Region:   region,
+		Attributes: map[string]any{
+			"cloud_id": name,
+			"name":     name,
+			"arn":      stringAttr(attrs, "arn"),
+			"version":  stringAttr(attrs, "version"),
+			"role":     stringAttr(attrs, "role_arn"),
+			"vpc_id":   nestedStringAttr(attrs, "vpc_config", "vpc_id"),
+		},
+		Tags: extractTags(attrs),
+	}
+}
+
 func versioningStatus(attrs map[string]any) string {
 	raw, ok := attrs["versioning"]
 	if !ok {
@@ -164,6 +255,41 @@ func extractTags(attrs map[string]any) map[string]string {
 func stringAttr(attrs map[string]any, key string) string {
 	if v, ok := attrs[key]; ok {
 		return fmt.Sprint(v)
+	}
+	return ""
+}
+
+func intAttr(attrs map[string]any, key string) int {
+	switch v := attrs[key].(type) {
+	case int:
+		return v
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
+func boolAttr(attrs map[string]any, key string) bool {
+	v, _ := attrs[key].(bool)
+	return v
+}
+
+func nestedStringAttr(attrs map[string]any, key, nestedKey string) string {
+	switch raw := attrs[key].(type) {
+	case []any:
+		if len(raw) == 0 {
+			return ""
+		}
+		if block, ok := raw[0].(map[string]any); ok {
+			return stringAttr(block, nestedKey)
+		}
+	case map[string]any:
+		return stringAttr(raw, nestedKey)
 	}
 	return ""
 }
