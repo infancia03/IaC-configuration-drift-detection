@@ -308,9 +308,9 @@ func (f *Fetcher) fetchRDSInstances(ctx context.Context, cfg aws.Config) ([]Reso
 				DBInstanceClass:    aws.ToString(db.DBInstanceClass),
 				Status:             aws.ToString(db.DBInstanceStatus),
 				StorageType:        aws.ToString(db.StorageType),
-				AllocatedStorage:   aws.ToInt32(db.AllocatedStorage),
-				MultiAZ:            aws.ToBool(db.MultiAZ),
-				PubliclyAccessible: aws.ToBool(db.PubliclyAccessible),
+				AllocatedStorage:   int32Value(db.AllocatedStorage),
+				MultiAZ:            boolValue(db.MultiAZ),
+				PubliclyAccessible: boolValue(db.PubliclyAccessible),
 				VPCID:              vpcID,
 				Tags:               tags,
 			})
@@ -341,8 +341,8 @@ func (f *Fetcher) fetchLambdaFunctions(ctx context.Context, cfg aws.Config) ([]R
 				Runtime:    string(fn.Runtime),
 				Handler:    aws.ToString(fn.Handler),
 				Role:       aws.ToString(fn.Role),
-				MemorySize: aws.ToInt32(fn.MemorySize),
-				Timeout:    aws.ToInt32(fn.Timeout),
+				MemorySize: int32Value(fn.MemorySize),
+				Timeout:    int32Value(fn.Timeout),
 				Tags:       tags,
 			})
 		}
@@ -463,4 +463,18 @@ func tagValue(tags []ec2types.Tag, key string) string {
 		}
 	}
 	return ""
+}
+
+func int32Value(value *int32) int32 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func boolValue(value *bool) bool {
+	if value == nil {
+		return false
+	}
+	return *value
 }
