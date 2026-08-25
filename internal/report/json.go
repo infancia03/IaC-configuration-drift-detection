@@ -4,16 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-
-	"github.com/infancia03/IaC-configuration-drift-detection/internal/model"
 )
 
-// WriteJSON writes a drift report as indented JSON.
-func WriteJSON(w io.Writer, report model.DriftReport) error {
+// WriteJSON writes a value as indented JSON.
+func WriteJSON(w io.Writer, value any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(report); err != nil {
-		return fmt.Errorf("encode report: %w", err)
+	if err := enc.Encode(value); err != nil {
+		return fmt.Errorf("encode json: %w", err)
 	}
 	return nil
 }
